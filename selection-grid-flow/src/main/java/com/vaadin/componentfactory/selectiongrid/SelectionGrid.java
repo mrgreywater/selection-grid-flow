@@ -29,6 +29,7 @@ import com.vaadin.flow.component.grid.GridMultiSelectionModel;
 import com.vaadin.flow.component.grid.GridSelectionModel;
 import com.vaadin.flow.data.provider.DataCommunicator;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -102,7 +103,7 @@ public class SelectionGrid<T> extends Grid<T> {
      */
     public void focusOnCell(T item, Column<T> column) {
         int index = getIndexForItem(item);
-        if (index > 0) {
+        if (index >= 0) {
             int colIndex = (column != null)?getColumns().indexOf(column):0;
             // delay the call of focus on cell if it's used on the same round trip (grid creation + focusCell)
             this.getElement().executeJs("setTimeout(function() { $0.focusOnCell($1, $2) });", getElement(), index, colIndex);
@@ -114,17 +115,21 @@ public class SelectionGrid<T> extends Grid<T> {
         return getItemsInOrder().indexOf(item);
     }
 
+    @SuppressWarnings("unchecked")
+    private Stream<T> fetchFromProvider(int offset, int limit) throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
+        Method fetchFromProvider = DataCommunicator.class.getDeclaredMethod("fetchFromProvider", int.class, int.class);
+        fetchFromProvider.setAccessible(true);
+        return ((Stream<T>) fetchFromProvider.invoke(super.getDataCommunicator(), offset, limit)).limit(limit);
+    }
+
     private List<T> getItemsInOrder() {
         DataCommunicator<T> dataCommunicator = super.getDataCommunicator();
-        Method fetchFromProvider;
         Method getDataProviderSize;
         try {
-            fetchFromProvider = DataCommunicator.class.getDeclaredMethod("fetchFromProvider", int.class, int.class);
             getDataProviderSize = DataCommunicator.class.getDeclaredMethod("getDataProviderSize");
-            fetchFromProvider.setAccessible(true);
             getDataProviderSize.setAccessible(true);
             int size = (Integer) getDataProviderSize.invoke(dataCommunicator);
-            return ((Stream<T>) fetchFromProvider.invoke(dataCommunicator, 0, size)).collect(Collectors.toList());
+            return (fetchFromProvider(0, size)).collect(Collectors.toList());
         } catch (Exception ignored) {
         }
         return new ArrayList<>();
@@ -152,12 +157,8 @@ public class SelectionGrid<T> extends Grid<T> {
     private void selectRange(int fromIndex, int toIndex) {
         GridSelectionModel<T> model = getSelectionModel();
         if (model instanceof GridMultiSelectionModel) {
-            DataCommunicator<T> dataCommunicator = super.getDataCommunicator();
-            Method fetchFromProvider;
             try {
-                fetchFromProvider = DataCommunicator.class.getDeclaredMethod("fetchFromProvider", int.class, int.class);
-                fetchFromProvider.setAccessible(true);
-                asMultiSelect().select(((Stream<T>) fetchFromProvider.invoke(dataCommunicator, Math.min(fromIndex, toIndex), Math.max(fromIndex,
+                asMultiSelect().select((fetchFromProvider(Math.min(fromIndex, toIndex), Math.max(fromIndex,
                     toIndex) - Math.min(fromIndex, toIndex) + 1)).collect(Collectors.toList()));
             } catch (Exception ignored) {
                 ignored.printStackTrace();
@@ -176,12 +177,8 @@ public class SelectionGrid<T> extends Grid<T> {
         if (model instanceof GridMultiSelectionModel) {
             int from = Math.min(fromIndex, toIndex);
             int to = Math.max(fromIndex, toIndex);
-            DataCommunicator<T> dataCommunicator = super.getDataCommunicator();
-            Method fetchFromProvider;
             try {
-                fetchFromProvider = DataCommunicator.class.getDeclaredMethod("fetchFromProvider", int.class, int.class);
-                fetchFromProvider.setAccessible(true);
-                Set<T> newSelectedItems = ((Stream<T>) fetchFromProvider.invoke(dataCommunicator, from, to - from + 1)).collect(Collectors.toSet());
+                Set<T> newSelectedItems = (fetchFromProvider(from, to - from + 1)).collect(Collectors.toSet());
                 HashSet<T> oldSelectedItems = new HashSet<>(getSelectedItems());
                 oldSelectedItems.removeAll(newSelectedItems);
                 asMultiSelect().updateSelection(newSelectedItems, oldSelectedItems);
